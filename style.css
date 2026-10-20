@@ -3,3 +3,5 @@
 
 input.task-date{width:155px;font-size:11px;padding:4px 6px;margin-top:6px;background:transparent}
 [hidden]{display:none!important}
+
+.cloud-banner{margin:16px 0 0;padding:10px 15px;border:1px solid var(--line);border-radius:9px;background:#fff;display:flex;align-items:center;justify-content:space-between;gap:12px;color:var(--muted);font-size:11px}.cloud-banner button{font-size:11px;flex-shrink:0;padding:7px 10px}.sync-message{font-size:14px;line-height:1.9}.error{color:#a53e2d}.sync-light{font-size:11px;background:#eef0eb;padding:6px 10px;border-radius:15px;white-space:nowrap}.sync-light.connected{background:#e7f0d8;color:#35634f}.sync-light.failed{background:#fae9e3;color:#a53e2d}.sync-auto{display:flex;align-items:center;gap:10px;line-height:1.8}.sync-auto input{accent-color:var(--green);width:17px;height:17px;flex-shrink:0}.sync-conflict{padding:18px;background:#faf5e8;border:1px solid #e5d8b8;border-radius:10px;margin:20px 0}button:disabled{opacity:.5;cursor:wait}#history-items button{display:block;margin-top:10px}@media(max-width:650px){.cloud-banner{align-items:flex-start}.sync-conflict .toolbar{display:grid;grid-template-columns:1fr}}
