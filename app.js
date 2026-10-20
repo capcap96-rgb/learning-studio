@@ -40,3 +40,20 @@ if(window.createDriveUI)driveUI=window.createDriveUI({
   const raw=JSON.stringify(next);localStorage.setItem(KEY,raw);diskSnapshot=raw;db=next;showAnswer=false;render();
  }
 });
+
+// Display settings do not modify learning records or trigger cloud synchronization.
+(function setupTextSize(){
+ const key='learning-studio-text-size',allowed=['small','medium','large'];
+ const buttons=Array.from(document.querySelectorAll('button[data-text-size]'));
+ function apply(size){
+  if(!allowed.includes(size))size='medium';
+  document.documentElement.dataset.textSize=size;
+  buttons.forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.textSize===size)));
+ }
+ apply(document.documentElement.dataset.textSize);
+ buttons.forEach(button=>button.addEventListener('click',()=>{
+  const size=button.dataset.textSize;apply(size);
+  try{localStorage.setItem(key,size)}catch{toast('已調整字體，但此瀏覽器無法記住偏好。')}
+ }));
+ window.addEventListener('storage',event=>{if(event.key===key)apply(event.newValue)});
+})();
