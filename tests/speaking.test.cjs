@@ -1,0 +1,60 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs'),vm=require('node:vm');
+const C=require('../speaking.js');
+const {SyncEngine,fingerprint}=require('../drive.js');
+const copy=x=>JSON.parse(JSON.stringify(x));
+const stamp='2026-10-21T01:00:00.000Z';
+const plan={id:'p',title:'English',goal:'Speak',end:'',hours:'',motivation:'',resources:'',milestones:''};
+function base(){return {version:1,plans:[copy(plan)],tasks:[],works:{},sessions:[],cards:[],reviews:[],active:'p'}}
+function course(){const d=base();d.speaking={version:1,courses:[{id:'c',plan:'p',title:'Round 1',createdAt:stamp}],logs:[]};return d}
+function log(overrides={}){return {id:crypto.randomUUID(),course:'c',lesson:1,date:'2026-10-21',time:'09:00',minutes:10,checks:[],counts:{poems:0},note:'',recordingUrl:'',createdAt:stamp,updatedAt:stamp,deletedAt:'',...overrides}}
+const app=fs.readFileSync(require('node:path').join(__dirname,'..','app.js'),'utf8');
+const validateSource=app.slice(app.indexOf('function validate(d){'),app.indexOf('\nfunction save()'));
+const validateApp=vm.runInNewContext('('+validateSource+')',{window:{Speaking:C}});
+test('30 unique lessons: 24 main days and six extension sessions',()=>{assert.equal(C.lessons.length,30);assert.deepEqual(C.lessons.slice(24).map(l=>l.video),['5-1','5-2','5-3','5-4','6-1','6-2']);assert.equal(new Set(C.lessons.map(l=>l.id)).size,30);assert.equal(C.lessons[24].title,'延伸練習 1')});
+test('first day omits background listening; later days use correct previous videos',()=>{assert.ok(!C.lesson(1).items.some(i=>i.id==='listening'));assert.match(C.lesson(2).items[0].label,/1-1/);assert.match(C.lesson(25).items[0].label,/4-6、4-5/);assert.match(C.lesson(30).items[0].label,/6-1、5-4/)});
+test('poem groups match all six CH1 days',()=>{assert.deepEqual(C.lessons.slice(0,6).map(l=>l.items.find(i=>i.id==='poems').details.length),[3,2,2,3,2,1]);assert.match(C.lesson(6).items.find(i=>i.id==='poems').details[0],/Better Path/)});
+test('dialog turns alternate within each chapter',()=>{for(const [chapter,turns] of [[2,[2,4]],[3,[3,6]],[4,[4,8]]])for(let i=0;i<6;i++)assert.match(C.lessons[(chapter-1)*6+i].items.find(t=>t.id==='dialog').label,new RegExp('^'+turns[i%2]+'-Turn'))});
+test('extension 1-4 use paraphrasing and 5-6 use logical frameworks',()=>{for(let i=25;i<=28;i++)assert.match(C.lesson(i).items.find(x=>x.id==='phrases').label,/轉換句/);for(let i=29;i<=30;i++)assert.match(C.lesson(i).items.find(x=>x.id==='phrases').label,/邏輯框架句/)});
+test('legacy v1 backup validates without adding speaking or changing data',()=>{const d=base(),raw=JSON.stringify(d);assert.equal(validateApp(d),d);assert.equal(JSON.stringify(d),raw);assert.equal(C.state(d).courses.length,0)});
+test('new backup retains old plans, tasks and works and round-trips speaking data',()=>{const d=course();d.works['p:4']={q0:'Old answer'};d.speaking.logs.push(log({checks:['video','poems'],counts:{poems:2},recordingUrl:'https://drive.google.com/file/d/example/view'}));assert.equal(validateApp(d),d);const restored=validateApp(JSON.parse(JSON.stringify(d)));assert.deepEqual(restored,d)});
+test('unsupported speaking versions fail instead of silently dropping data',()=>{const d=course();d.speaking.version=2;assert.throws(()=>validateApp(d),/版本不相容/)});
+test('reject invalid course plan references and duplicate IDs',()=>{let d=course();d.speaking.courses[0].plan='missing';assert.throws(()=>validateApp(d));d=course();d.speaking.courses.push(copy(d.speaking.courses[0]));assert.throws(()=>validateApp(d))});
+test('reject malformed dates, times, durations and unsafe recording URLs',()=>{for(const patch of [{date:'2026-02-30'},{time:'25:00'},{minutes:0},{minutes:-1},{minutes:Infinity},{recordingUrl:'javascript:alert(1)'},{recordingUrl:'data:text/html,x'}]){const d=course();d.speaking.logs.push(log(patch));assert.throws(()=>validateApp(d))}});
+test('reject unknown checklist keys and missing repetition counts',()=>{for(const patch of [{checks:['unknown']},{checks:['poems'],counts:{poems:0}},{counts:{poems:1.5}},{checks:['video','video']},{counts:{dialog:1}}]){const d=course();d.speaking.logs.push(log(patch));assert.throws(()=>validateApp(d))}});
+test('partial sessions are valid and accumulated checks complete a lesson',()=>{const d=course();d.speaking.logs.push(log({checks:['video']}));assert.equal(C.completion(d,'c',1).complete,false);d.speaking.logs.push(log({checks:['poems'],counts:{poems:2}}));assert.equal(C.completion(d,'c',1).complete,true);assert.equal(C.progress(d,'c').main,1);assert.equal(C.progress(d,'c').count,2)});
+test('repeat sessions do not add duplicate course-day completions',()=>{const d=course();for(let i=0;i<3;i++)d.speaking.logs.push(log({checks:['video','poems'],counts:{poems:1}}));assert.equal(C.progress(d,'c').main,1);assert.equal(C.progress(d,'c').count,3);assert.equal(C.progress(d,'c').days,1);assert.equal(C.progress(d,'c').minutes,30)});
+test('same course lesson can span multiple dates and separate time entries',()=>{const d=course();d.speaking.logs.push(log({date:'2026-10-20',checks:['video']}),log({checks:['poems'],counts:{poems:1}}),log({time:'20:00',minutes:5}));assert.equal(C.progress(d,'c').days,2);assert.equal(C.progress(d,'c').count,3);assert.equal(C.progress(d,'c').minutes,25);assert.equal(C.progress(d,'c').main,1)});
+test('editing a log changes totals once and deletion/restore recomputes progress',()=>{const d=course();const l=log({checks:['video','poems'],counts:{poems:1}});d.speaking.logs.push(l);l.minutes=25;assert.equal(C.progress(d,'c').minutes,25);l.deletedAt=stamp;assert.equal(C.progress(d,'c').main,0);assert.equal(C.progress(d,'c').count,0);l.deletedAt='';assert.equal(C.progress(d,'c').main,1);assert.equal(C.progress(d,'c').count,1)});
+test('a new round does not inherit previous round progress',()=>{const d=course();d.speaking.logs.push(log({checks:['video','poems'],counts:{poems:1}}));d.speaking.courses.push({id:'c2',plan:'p',title:'Round 2',createdAt:stamp});assert.equal(C.progress(d,'c2').main,0);assert.equal(C.progress(d,'c').main,1)});
+test('weekly stats use actual practice date, selected plan and nondeleted logs',()=>{const d=course();d.plans.push({...plan,id:'other'});d.speaking.courses.push({id:'otherCourse',plan:'other',title:'Other',createdAt:stamp});d.speaking.logs.push(log({date:'2026-10-14'}),log({date:'2026-10-15',minutes:15}),log({date:'2026-10-21',minutes:20}),log({date:'2026-10-22'}),log({course:'otherCourse'}),log({deletedAt:stamp}));assert.deepEqual(C.recent(d,'p','2026-10-15','2026-10-21'),{count:2,minutes:35,days:2})});
+test('next lesson follows cumulative completion; all-complete round permits repeat from lesson one',()=>{const d=course();for(const l of C.lessons){d.speaking.logs.push(log({lesson:l.id,checks:l.items.map(x=>x.id),counts:Object.fromEntries(l.items.filter(x=>x.count).map(x=>[x.id,1]))}));}validateApp(d);assert.equal(C.progress(d,'c').main,24);assert.equal(C.progress(d,'c').extra,6);assert.equal(C.progress(d,'c').next,1)});
+test('Drive fingerprints include speaking edits without requiring a new root backup version',async()=>{const d=course(),h=await fingerprint(d);d.speaking.logs.push(log());assert.notEqual(await fingerprint(d),h);assert.equal(d.version,1)});
+test('Drive upload and fresh-device download include full speaking records and old learning data',async()=>{
+ let remote=[],sequence=0;
+ const api={list:async()=>remote.map(({data,...rest})=>copy(rest)),read:async f=>copy(remote.find(x=>x.id===f.id).data),create:async(data,parents)=>{const f={id:'cloud'+(++sequence),createdTime:stamp,appProperties:Object.fromEntries(parents.map((p,i)=>['parent'+i,p])),data:copy(data)};remote.push(f);return copy(f)}};
+ function device(initial){let d=copy(initial);return {get:()=>d,engine:new SyncEngine({get:()=>d,validate:validateApp,guard(){},replace(next){d=copy(next)},meta(){}},api)}}
+ const first=course();first.speaking.logs.push(log({checks:['video','poems'],counts:{poems:1},note:'Progress'}));
+ const a=device(first);assert.equal(await a.engine.run(),'conflict');assert.equal(await a.engine.resolve('local'),'pushed');
+ const b=device({version:1,plans:[],tasks:[],works:{},sessions:[],cards:[],reviews:[],active:''});assert.equal(await b.engine.run(),'pulled');assert.deepEqual(b.get(),first);assert.equal(C.progress(b.get(),'c').main,1);
+});
+
+// Exercise view generation and submit handlers without a browser or Google account.
+function uiHarness(initial){
+ let data=copy(initial),toasts=[],renders=0;
+ const nodes=new Map(),groups=new Map();
+ const document={querySelector:k=>nodes.get(k)||null,querySelectorAll:k=>groups.get(k)||[]};
+ class FakeFormData{constructor(form){this.values=form.values||{}}get(k){return this.values[k]??null}getAll(k){const v=this.values[k];return Array.isArray(v)?v:v===undefined?[]:[v]}*[Symbol.iterator](){for(const [k,v] of Object.entries(this.values))yield[k,v]}}
+ const sandbox={window:{},document,crypto,URL,Date,FormData:FakeFormData,confirm:()=>true,location:{hash:'speaking'}};
+ vm.runInNewContext(fs.readFileSync(require('node:path').join(__dirname,'..','speaking.js'),'utf8'),sandbox);
+ const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ const ui=sandbox.window.createSpeakingUI({get:()=>copy(data),escape,heading:()=>'',today:()=> '2026-10-21',toast:s=>toasts.push(s),hasDraft:()=>false,clearDraft(){},render(){renders++},commit(next){validateApp(next);data=copy(next)}});
+ const node=values=>({values,handlers:{},dataset:{},addEventListener(type,fn){this.handlers[type]=fn}});
+ return {ui,nodes,groups,node,get:()=>data,toasts,renders:()=>renders};
+}
+test('empty view offers a course form without mutating legacy data',()=>{const h=uiHarness(base());const before=JSON.stringify(h.get()),html=h.ui.page();assert.match(html,/speaking-course-form/);assert.match(html,/24 天主課程/);assert.equal(JSON.stringify(h.get()),before)});
+test('course creation handler atomically creates a linked plan and round',()=>{const h=uiHarness(base()),form=h.node({title:'My speaking round',plan:'new'});h.nodes.set('#speaking-course-form',form);h.ui.bind();form.handlers.submit({preventDefault(){},currentTarget:form});assert.equal(h.get().speaking.courses.length,1);assert.equal(h.get().plans.length,2);assert.equal(h.get().speaking.courses[0].plan,h.get().active);assert.equal(h.renders(),1)});
+test('training submit handler creates an independent record and shows it in history',()=>{const h=uiHarness(course()),form=h.node({editId:'',date:'2026-10-21',time:'12:30',minutes:'15',checks:['video','poems'],count_poems:'2',note:'<script>not HTML</script>',recordingUrl:'https://example.com/recording'});h.ui.page();h.nodes.set('#speaking-log-form',form);h.ui.bind();form.handlers.submit({preventDefault(){},currentTarget:form});assert.equal(h.get().speaking.logs.length,1);assert.equal(h.get().speaking.logs[0].minutes,15);assert.equal(h.get().speaking.logs[0].counts.poems,2);const html=h.ui.page();assert.match(html,/每一次開口的紀錄/);assert.match(html,/&lt;script&gt;not HTML/);assert.match(html,/2026-10-21 12:30/)});
+test('invalid training form keeps existing data and reports an error',()=>{const h=uiHarness(course()),form=h.node({editId:'',date:'2026-10-22',time:'12:00',minutes:'10',checks:[],count_poems:'0',note:'',recordingUrl:''});h.ui.page();h.nodes.set('#speaking-log-form',form);h.ui.bind();form.handlers.submit({preventDefault(){},currentTarget:form});assert.equal(h.get().speaking.logs.length,0);assert.match(h.toasts[0],/今天或之前/);assert.equal(h.renders(),0)});
+test('fractional-minute totals remain readable',()=>{const d=course();d.speaking.logs.push(log({minutes:.1}),log({minutes:.2}));assert.equal(C.progress(d,'c').minutes,.3);assert.equal(C.recent(d,'p','2026-10-21','2026-10-21').minutes,.3)});
