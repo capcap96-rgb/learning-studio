@@ -69,7 +69,7 @@
       parents.forEach((value, n) => { properties['parent' + n] = value; });
       const stamp = new Date().toISOString();
       const metadata = { name: 'learning-studio-' + stamp.replace(/[:.]/g, '-') + '.json', mimeType: 'application/json', parents: ['appDataFolder'], appProperties: properties };
-      const content = JSON.stringify({ format: 'learning-studio-drive', schemaVersion: 1, appVersion: '1.2.0', createdAt: stamp, parents, data });
+      const content = JSON.stringify({ format: 'learning-studio-drive', schemaVersion: 1, appVersion: '1.2.1', createdAt: stamp, parents, data });
       if (new TextEncoder().encode(content).length > 10 * 1024 * 1024) throw Error('資料超過 10MB，請先匯出備份。');
       const boundary = 'learning_' + crypto.randomUUID().replaceAll('-', '');
       const body = '--' + boundary + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify(metadata) + '\r\n--' + boundary + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + content + '\r\n--' + boundary + '--\r\n';
@@ -264,7 +264,7 @@ if (typeof window !== 'undefined') window.createDriveUI = function (bridge) {
   }
   function panel() {
     const connected = active(), conflict = engine?.conflict, disabled = operation || authBusy;
-    return `<div class="row"><div><span class="badge">GOOGLE DRIVE / V1.2.0</span><h2 style="margin-top:12px">跨裝置學習紀錄</h2></div><span class="sync-light ${error ? 'failed' : connected ? 'connected' : ''}">${connected ? '已連接' : '未連接'}</span></div>
+    return `<div class="row"><div><span class="badge">GOOGLE DRIVE / V1.2.1</span><h2 style="margin-top:12px">跨裝置學習紀錄</h2></div><span class="sync-light ${error ? 'failed' : connected ? 'connected' : ''}">${connected ? '已連接' : '未連接'}</span></div>
       <p class="sync-message ${error ? 'error' : ''}" role="status">${escape(status)}</p>
       ${user ? `<p class="caption">目前帳號：${escape(user.emailAddress || user.displayName)}<br>最後成功同步：${escape(time(engine?.meta.lastSync))}</p>` : '<p class="caption">在每台裝置開啟同一個網站，連接同一個 Google 帳號，即可讀取學習紀錄。重新整理後需再次按「連接 Google Drive」。</p>'}
       ${accountNotice ? `<p class="hint">${escape(accountNotice)}</p>` : ''}
